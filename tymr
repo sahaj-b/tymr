@@ -44,7 +44,10 @@ cleanup() {
   [ -n "$SOUND_LOOP_PGID" ] && kill -- -"$SOUND_LOOP_PGID" 2>/dev/null
   # [ -n "$$" ] && delete_timer "$$" false 2>/dev/null
   # dont delete timer so it can be revived later
-  exit
+
+  # rethrow SIGINT to let parent process also handle it, useful when tymr is in a loop and user do Ctrl+C
+  trap - INT
+  kill -INT $$
 }
 
 trap cleanup INT TERM
@@ -66,7 +69,7 @@ dim() {
 }
 
 # check dependencies
-for cmd in date notify-send timeout; do
+for cmd in date notify-send; do
   if ! command -v "$cmd" &>/dev/null; then
     err "Command not found: $cmd. Please install it."
     exit 1
@@ -81,14 +84,12 @@ opt() {
 show_time_format() {
   echo -e "  ${C_BOLD}Plain seconds:${C_RESET}    300, 1500, etc."
   echo -e "  ${C_BOLD}Duration format:${C_RESET}  5m, 2h30m, 1d12h, etc."
-  echo -e "  ${C_BOLD}Date/time format:${C_RESET} 10:30, 10:30am, 14:45:00, +2 days 5:00pm, etc."
+  echo -e "  ${C_BOLD}Date/time format:${C_RESET} '10:30', '10:30am', 'next Friday 14:00', '+2 days 5:00pm', etc."
   dim "  See 'date --help' for more information on valid date/time formats."
 }
 show_help() {
-  echo -e "${C_BOLD}${C_CYAN}tymr${C_RESET} - A modern terminal timer"
-  echo
   echo -e "${C_BOLD}USAGE:${C_RESET}"
-  echo -e "  timer ${C_DIM}[OPTIONS]${C_RESET} ${C_YELLOW}TIME_OR_SECONDS${C_RESET} ${C_DIM}[TIMER_NAME]${C_RESET}"
+  echo -e "  timer ${C_DIM}[OPTIONS]${C_RESET} ${C_YELLOW}TIME/DURATION${C_RESET} ${C_DIM}[TIMER_NAME]${C_RESET}"
   echo
   echo -e "${C_BOLD}OPTIONS:${C_RESET}"
   opt "-s, --stopwatch       " "Run as stopwatch (counts up)"
@@ -103,7 +104,7 @@ show_help() {
   opt "-d, --delete PID_OR_NAME " "Delete timer by PID or Timer Name"
   opt "-r, --revive             " "Revive killed timers' processes"
   echo
-  echo -e "${C_BOLD}TIME FORMATS:${C_RESET}"
+  echo -e "${C_BOLD}TIME/DURATION FORMATS:${C_RESET}"
   show_time_format
 }
 
@@ -122,12 +123,12 @@ detect_player() {
     PLAYER_CMD="paplay"
     PLAYER_VOL_FLAG="--volume="
     PLAYER_VOL_MULTIPLIER=655
-  elif command -v mpv &>/dev/null; then
-    PLAYER_CMD="mpv --no-video --no-terminal --no-config"
-    PLAYER_VOL_FLAG="--volume="
   elif command -v ffplay &>/dev/null; then
     PLAYER_CMD="ffplay -nodisp -autoexit -v quiet"
     PLAYER_VOL_FLAG="-volume "
+  elif command -v mpv &>/dev/null; then
+    PLAYER_CMD="mpv --no-video --no-terminal --no-config"
+    PLAYER_VOL_FLAG="--volume="
   else
     warn "No audio player found (paplay, mpv, ffplay). Sound disabled."
     NO_SOUND=true
@@ -240,8 +241,8 @@ list_timers() {
   fi
 
   ALL_ACTIVE=true
-  printf "${C_BOLD}%-8s │ %-12s │ %-12s │ %-s${C_RESET}\n" "PID" "End Time" "Time Left" "Name"
-  echo "─────────┼──────────────┼──────────────┼────────────────────"
+  printf "${C_BOLD}%-8s │ %-15s │ %-10s │ %-s${C_RESET}\n" "PID" "End Time" "Time Left" "Name"
+  echo "─────────┼─────────────────┼────────────┼────────────────────"
 
   while IFS= read -r line; do
     IFS="$DELIMITER" read -r pid end_time name <<<"$line"
@@ -264,16 +265,21 @@ list_timers() {
       time_left_color="$C_RED"
     else
       remaining=$((end_time - current_time))
-      local hours=$((remaining / 3600))
+      local days=$((remaining / 86400))
+      local hours=$(((remaining % 86400) / 3600))
       local minutes=$(((remaining % 3600) / 60))
-      local seconds=$((remaining % 60))
-      time_left_val="${hours}h ${minutes}m ${seconds}s"
+
+      time_left_val=""
+      [ "$days" -gt 0 ] && time_left_val="${days}d "
+      [ "$hours" -gt 0 ] && time_left_val="${time_left_val}${hours}h "
+      [ "$minutes" -gt 0 ] && time_left_val="${time_left_val}${minutes}m"
+      time_left_val="${time_left_val# }"
       time_left_color="$C_GREEN"
     fi
 
-    end_time_str=$(date -d "@$end_time" +"%I:%M%P")
+    end_time_str=$(date -d "@$end_time" +"%-d %b %I:%M%P")
 
-    printf "${pid_color}%-8s${C_RESET} │ %-12s │ ${time_left_color}%-12s${C_RESET} │ ${C_MAGENTA}%s${C_RESET}\n" \
+    printf "${pid_color}%-8s${C_RESET} │ %-15s │ ${time_left_color}%-10s${C_RESET} │ ${C_MAGENTA}%s${C_RESET}\n" \
       "$pid_val" "$end_time_str" "$time_left_val" "$name"
 
   done <"$STATE_FILE"
@@ -282,7 +288,7 @@ list_timers() {
     echo
     err "Some timer processes were KILLED (happens after system restart)"
     warn "Run ${C_BOLD}tymr --revive${C_RESET}${C_YELLOW} to restore them and clean up EXPIRED ones"
-    dim "Consider automating this on startup"
+    dim "Consider automating that on startup"
   fi
 
 }
@@ -440,10 +446,15 @@ if [ "$NO_SOUND" = false ]; then
     CMD_TO_RUN_1="$PLAYER_CMD $VOLUME_ARGS /usr/share/sounds/freedesktop/stereo/service-login.oga"
     CMD_TO_RUN_2="$PLAYER_CMD $VOLUME_ARGS /usr/share/sounds/freedesktop/stereo/service-logout.oga"
     (while :; do
-      # --foreground coz it otherwise timeout spawns a new process group, so kill won't work for players
-      # this fucking took me 2 hours to debug
-      timeout --foreground 2 bash -c "$CMD_TO_RUN_1"
-      timeout --foreground 2 bash -c "$CMD_TO_RUN_2"
+      if command -v timeout &>/dev/null; then
+        # --foreground coz it otherwise timeout spawns a new process group, so kill won't work for players
+        # this fucking took me 2 hours to debug
+        timeout --foreground 2 bash -c "$CMD_TO_RUN_1"
+        timeout --foreground 2 bash -c "$CMD_TO_RUN_2"
+      else
+        bash -c "$CMD_TO_RUN_1"
+        bash -c "$CMD_TO_RUN_2"
+      fi
     done) &
     SOUND_LOOP_PGID=$!
   fi
