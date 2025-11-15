@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-BACKGROUND=false
+FOREGROUND=false
 NO_SOUND=false
 SOUND_FILE=""
 VOLUME=""
@@ -11,6 +11,14 @@ DELIMITER="|"
 ORIGINAL_ARGS=("$@")
 SOUND_LOOP_PID=""
 
+cleanup() {
+  [ -n "$SOUND_LOOP_PID" ] && kill "$SOUND_LOOP_PID" 2>/dev/null
+  [ -n "$$" ] && delete_timer "$$" false 2>/dev/null
+  exit
+}
+
+trap cleanup INT TERM
+
 err() {
   echo -e "\e[31m$1\e[0m" >&2
 }
@@ -20,7 +28,7 @@ warn() {
 
 # check dependencies
 for cmd in date notify-send paplay timeout; do
-  if ! command -v $cmd &>/dev/null; then
+  if ! command -v "$cmd" &>/dev/null; then
     err "Command not found: $cmd. Please install it."
     exit 1
   fi
@@ -37,9 +45,9 @@ show_help() {
   echo
   echo "Options:"
   echo "  -s, --stopwatch        Run as stopwatch (counts up)"
-  echo "  -b, --background       Run in background"
+  echo "  -f, --foreground        Run timer in foreground"
   echo "  -n, --no-sound         Disable alarm sound"
-  echo "  -f, --sound-file PATH  Custom sound file to loop"
+  echo "  -S, --sound-file PATH  Custom sound file to loop"
   echo "  -v, --volume VOL       Set volume"
   echo "  -h, --help             Show this help message"
   echo
@@ -99,9 +107,9 @@ parse_args() {
       exit 0
       ;;
     -s | --stopwatch) STOPWATCH=1 ;;
-    -b | --background) BACKGROUND=true ;;
+    -f | --foreground) FOREGROUND=true ;;
     -n | --no-sound) NO_SOUND=true ;;
-    -f | --sound-file)
+    -S | --sound-file)
       shift
       SOUND_FILE="$1"
       if [ ! -f "$SOUND_FILE" ]; then
@@ -112,8 +120,8 @@ parse_args() {
     -v | --volume)
       shift
       VOLUME="$1"
-      if ! [[ "$VOLUME" =~ ^[0-9]+$ ]] || [ "$VOLUME" -lt 1 ]; then
-        echo "Volume must be greater than 0"
+      if ! [[ "$VOLUME" =~ ^[0-9]+$ ]] || [ "$VOLUME" -lt 1 ] || [ "$VOLUME" -gt 100 ]; then
+        echo "Volume must be between 1-100"
         exit 1
       fi
       ;;
@@ -139,13 +147,9 @@ parse_args() {
 
 parse_args "$@"
 
-if [ "$BACKGROUND" = true ]; then
-  FILTERED_ARGS=()
-  for arg in "${ORIGINAL_ARGS[@]}"; do
-    [[ "$arg" != "-b" && "$arg" != "--background" ]] && FILTERED_ARGS+=("$arg")
-  done
-  "$0" "${FILTERED_ARGS[@]}" </dev/null >/dev/null 2>&1 &
-  echo "Timer running in background (PID: $!)"
+if [ "$FOREGROUND" = false ]; then
+  nohup "$0" --foreground "${ORIGINAL_ARGS[@]}" >/dev/null 2>&1 &
+  echo -e "\e[32mStarted timer in background with PID:\e[0m $!"
   exit 0
 fi
 
@@ -241,7 +245,7 @@ revive_timers() {
 
     if [ "$end_time" -le "$current_time" ]; then
       warn "Timer already expired: PID: $pid, Name: $name"
-      notify-send -u critical "Timer expired while system was off" "Timer: $name, On: $(date -d "@$end_time" '"%-d %b %I:%M%P"')"
+      notify-send -u critical "Timer expired while system was off" "Timer: $name, On: $(date -d "@$end_time" '%-d %b %I:%M%P')"
       continue
     fi
 
@@ -271,7 +275,7 @@ start_timer() {
   add_to_state "$end"
   while [ "$end" -ge "$(date +%s)" ]; do
     time="$((end - $(date +%s)))"
-    [ "$BACKGROUND" = false ] && printf '%s\r' "$(date -u -d "@$time" +%H:%M:%S)"
+    [ "$FOREGROUND" = true ] && printf '%s\r' "$(date -u -d "@$time" +%H:%M:%S)"
     sleep 0.5
   done
   delete_timer "$$" false
@@ -288,7 +292,7 @@ parse_time_input() {
     echo "$input"
   elif [[ "$input" =~ ^([0-9]+[dhms])+$ ]]; then
     to_seconds "$input"
-  elif target_epoch=$(date -d "$INPUT_TIME" +%s 2>/dev/null); then
+  elif target_epoch=$(date -d "$input" +%s 2>/dev/null); then
     current_epoch=$(date +%s)
     if [ "$target_epoch" -le "$current_epoch" ]; then
       err "Specified time is in the past: $input"
@@ -333,6 +337,6 @@ fi
 
 notify-send -u critical -w "Time's Up!" "$TIMER_NAME"
 
-if [ "$NO_SOUND" = false ]; then
-  kill $SOUND_LOOP_PID
+if [ "$NO_SOUND" = false ] && [ -n "$SOUND_LOOP_PID" ]; then
+  kill "$SOUND_LOOP_PID"
 fi
