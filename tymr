@@ -9,13 +9,19 @@ POSITIONAL_ARGS=()
 STATE_FILE="$HOME/.cache/tymr_state"
 DELIMITER="|"
 ORIGINAL_ARGS=("$@")
-SOUND_LOOP_PID=""
+SOUND_LOOP_PGID=""
 PLAYER_CMD=""
 PLAYER_VOL_FLAG=""
 PLAYER_VOL_MULTIPLIER=1
+CONFIG_FILE="$HOME/.config/tymr/config"
+
+if [ -f "$CONFIG_FILE" ]; then
+  # shellcheck source=/dev/null
+  source "$CONFIG_FILE"
+fi
 
 cleanup() {
-  [ -n "$SOUND_LOOP_PID" ] && kill "$SOUND_LOOP_PID" 2>/dev/null
+  [ -n "$SOUND_LOOP_PGID" ] && kill -- -"$SOUND_LOOP_PGID" 2>/dev/null
   [ -n "$$" ] && delete_timer "$$" false 2>/dev/null
   exit
 }
@@ -63,6 +69,13 @@ show_help() {
   show_time_format
 }
 detect_player() {
+  if [ "$PLAYER_CMD" != "" ]; then
+    if command -v "${PLAYER_CMD%% *}" &>/dev/null; then
+      return
+    else
+      warn "Configured audio player '${PLAYER_CMD%% *}' not found. Detecting automatically."
+    fi
+  fi
   if [ "$NO_SOUND" = true ]; then
     return
   fi
@@ -71,13 +84,28 @@ detect_player() {
     PLAYER_VOL_FLAG="--volume="
     PLAYER_VOL_MULTIPLIER=655
   elif command -v mpv &>/dev/null; then
-    PLAYER_CMD="mpv --no-video --no-terminal --no-config --volume="
+    PLAYER_CMD="mpv --no-video --no-terminal --no-config"
+    PLAYER_VOL_FLAG="--volume="
   elif command -v ffplay &>/dev/null; then
     PLAYER_CMD="ffplay -nodisp -autoexit -v quiet"
-    PLAYER_VOL_FLAG="-volume="
+    PLAYER_VOL_FLAG="-volume "
   else
-    err "No suitable audio player found (paplay or aplay). Sound will be disabled."
+    warn "No audio player found (paplay,mpv,ffplay). Sound will be disabled."
     NO_SOUND=true
+  fi
+}
+check_sound_files() {
+  if [ -n "$SOUND_FILE" ]; then
+    if [ ! -f "$SOUND_FILE" ]; then
+      err "Sound file not found: $SOUND_FILE"
+      exit 1
+    fi
+  else
+    if [ ! -f /usr/share/sounds/freedesktop/stereo/service-login.oga ] || [ ! -f /usr/share/sounds/freedesktop/stereo/service-logout.oga ]; then
+      warn "Default sound files not found. Sound will be disabled."
+      echo "Specify -S / --sound-file with a valid sound file to enable custom sound."
+      NO_SOUND=true
+    fi
   fi
 }
 
@@ -168,8 +196,10 @@ parse_args() {
 
 parse_args "$@"
 detect_player
+check_sound_files
 
-if [ "$FOREGROUND" = false ]; then
+if [ "$FOREGROUND" = false ] && [ $STOPWATCH -eq 0 ]; then
+  # TODO: check if it errored
   nohup "$0" --foreground "${ORIGINAL_ARGS[@]}" >/dev/null 2>&1 &
   echo -e "\e[32mStarted timer in background with PID:\e[0m $!"
   exit 0
@@ -197,7 +227,7 @@ delete_timer() {
       if [ "$pid" = "$pid_or_name" ] || [ "$name" = "$pid_or_name" ]; then
         REMOVED_LINE="PID: $pid, Name: $name"
         [ "$kill" = true ] && kill "$pid" 2>/dev/null
-        echo -e "\e[32mRemoved timer:\e[0m $REMOVED_LINE"
+        [ "$kill" = true ] && echo -e "\e[32mRemoved timer:\e[0m $REMOVED_LINE"
         continue
       fi
       echo "$line" >>"$tmp_file"
@@ -274,7 +304,7 @@ revive_timers() {
     if ! kill -0 "$pid" 2>/dev/null; then
       remaining=$((end_time - current_time))
       echo -e "\e[32mReviving timer:\e[0m PID: $pid, Name: $name, Remaining: $(date -u -d "@$remaining" +%H:%M:%S)"
-      "$0" -b "$remaining" "$name"
+      "$0" "$remaining" "$name"
     else
       echo "$line" >>"$tmp_file"
     fi
@@ -337,35 +367,33 @@ fi
 SECONDS=$(parse_time_input "$INPUT_TIME")
 start_timer "$SECONDS"
 
-if [ ! -f /usr/share/sounds/freedesktop/stereo/service-login.oga ] || [ ! -f /usr/share/sounds/freedesktop/stereo/service-logout.oga ]; then
-  warn "Default sound files not found. Sound will be disabled."
-  echo "Specify -S / --sound-file with a valid sound file to enable custom sound."
-  NO_SOUND=true
-fi
-
 if [ "$NO_SOUND" = false ]; then
-  VOLUME_FLAG=""
+  VOLUME_ARGS=""
   if [ -n "$VOLUME" ]; then
     VOL_VALUE=$((VOLUME * PLAYER_VOL_MULTIPLIER))
-    VOLUME_FLAG="$PLAYER_VOL_FLAG$VOL_VALUE"
+    VOLUME_ARGS="$PLAYER_VOL_FLAG$VOL_VALUE"
   fi
-
   if [ -n "$SOUND_FILE" ]; then
-    while :; do
-      timeout 2 "$PLAYER_CMD" $VOLUME_FLAG "$SOUND_FILE"
-    done &
-    SOUND_LOOP_PID=$!
+    CMD_TO_RUN="$PLAYER_CMD $VOLUME_ARGS \"$SOUND_FILE\""
+    (while :; do
+      eval "$CMD_TO_RUN"
+    done) &
+    SOUND_LOOP_PGID=$!
   else
-    while :; do
-      timeout 2 /usr/bin/paplay $VOLUME_FLAG /usr/share/sounds/freedesktop/stereo/service-login.oga
-      timeout 2 /usr/bin/paplay $VOLUME_FLAG /usr/share/sounds/freedesktop/stereo/service-logout.oga
-    done &
-    SOUND_LOOP_PID=$!
+    CMD_TO_RUN_1="$PLAYER_CMD $VOLUME_ARGS /usr/share/sounds/freedesktop/stereo/service-login.oga"
+    CMD_TO_RUN_2="$PLAYER_CMD $VOLUME_ARGS /usr/share/sounds/freedesktop/stereo/service-logout.oga"
+    (while :; do
+      # --foreground coz it otherwise timeout spawns a new process group, so kill won't work for players
+      # this fucking took me 2 hours to debug
+      timeout --foreground 2 bash -c "$CMD_TO_RUN_1"
+      timeout --foreground 2 bash -c "$CMD_TO_RUN_2"
+    done) &
+    SOUND_LOOP_PGID=$!
   fi
 fi
 
 notify-send -u critical -w "Time's Up!" "$TIMER_NAME"
 
-if [ "$NO_SOUND" = false ] && [ -n "$SOUND_LOOP_PID" ]; then
-  kill "$SOUND_LOOP_PID"
+if [ "$NO_SOUND" = false ] && [ -n "$SOUND_LOOP_PGID" ]; then
+  kill -- -"$SOUND_LOOP_PGID" 2>/dev/null
 fi
