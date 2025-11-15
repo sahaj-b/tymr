@@ -6,102 +6,215 @@ SOUND_FILE=""
 VOLUME=""
 STOPWATCH=0
 POSITIONAL_ARGS=()
+STATE_FILE="$HOME/.cache/tymr_state"
+DELIMITER="|"
+ORIGINAL_ARGS=("$@")
 
-while [[ "$#" -gt 0 ]]; do
-  case $1 in
-  -h | --help)
-    echo "Usage: timer [OPTIONS] TIME_OR_SECONDS [NOTIF_BODY] [NOTIF_TITLE]"
-    echo
-    echo "Options:"
-    echo "  -s, --stopwatch        Run as stopwatch (counts up)"
-    echo "  -b, --background       Run in background"
-    echo "  -n, --no-sound         Disable alarm sound"
-    echo "  -f, --sound-file PATH  Custom sound file to loop"
-    echo "  -v, --volume VOL       Set volume"
-    echo "  -h, --help             Show this help message"
-    echo
-    echo "TIME_OR_SECONDS can be in the format HH:MM, HH:MM:SS, HH:MMam/pm or seconds."
-    exit 0
-    ;;
-  -s | --stopwatch) STOPWATCH=1 ;;
-  -b | --background) BACKGROUND=true ;;
-  -n | --no-sound) NO_SOUND=true ;;
-  -f | --sound-file)
-    shift
-    SOUND_FILE="$1"
-    if [ ! -f "$SOUND_FILE" ]; then
-      echo "Sound file not found: $SOUND_FILE"
-      exit 1
-    fi
-    ;;
-  -v | --volume)
-    shift
-    VOLUME="$1"
-    if ! [[ "$VOLUME" =~ ^[0-9]+$ ]] || [ "$VOLUME" -lt 1 ]; then
-      echo "Volume must be greater than 0"
-      exit 1
-    fi
-    ;;
-  -*)
-    echo "Unknown option: $1"
-    exit 1
-    ;;
-  *)
-    POSITIONAL_ARGS+=("$1")
-    ;;
-  esac
-  shift
-done
+err() {
+  echo -e "\e[31m$1\e[0m" >&2
+}
+warn() {
+  echo -e "\e[33m$1\e[0m"
+}
+show_time_format() {
+  echo "Plain seconds: 300, 1500, etc."
+  echo "Duration format: 5m, 2h30m, 1d12h, etc."
+  echo "Date/time format: 10:30, 10:30am, 14:45:00, +2 days 5:00pm, etc."
+  echo "See 'date --help' for more information on valid date/time formats."
+}
+show_help() {
+  echo "Usage: timer [OPTIONS] TIME_OR_SECONDS [TITLE]"
+  echo
+  echo "Options:"
+  echo "  -s, --stopwatch        Run as stopwatch (counts up)"
+  echo "  -b, --background       Run in background"
+  echo "  -n, --no-sound         Disable alarm sound"
+  echo "  -f, --sound-file PATH  Custom sound file to loop"
+  echo "  -v, --volume VOL       Set volume"
+  echo "  -h, --help             Show this help message"
+  echo
+  echo "TIME_OR_SECONDS Formats:"
+  show_time_format
+}
 
-if [ $STOPWATCH -eq 1 ]; then
+to_seconds() {
+  local input="$1"
+  local total=0
+
+  while [[ $input =~ ([0-9]+)([smhd]) ]]; do
+    local val="${BASH_REMATCH[1]}"
+    local unit="${BASH_REMATCH[2]}"
+
+    case $unit in
+    s) total=$((total + val)) ;;
+    m) total=$((total + val * 60)) ;;
+    h) total=$((total + val * 3600)) ;;
+    d) total=$((total + val * 86400)) ;;
+    esac
+
+    # yeet the matched part from the string, keep parsing
+    input="${input#*"${BASH_REMATCH[0]}"}"
+  done
+
+  echo "$total"
+}
+
+parse_args() {
+  while [[ "$#" -gt 0 ]]; do
+    case $1 in
+    -h | --help)
+      show_help
+      exit 0
+      ;;
+    -s | --stopwatch) STOPWATCH=1 ;;
+    -b | --background) BACKGROUND=true ;;
+    -n | --no-sound) NO_SOUND=true ;;
+    -f | --sound-file)
+      shift
+      SOUND_FILE="$1"
+      if [ ! -f "$SOUND_FILE" ]; then
+        echo "Sound file not found: $SOUND_FILE"
+        exit 1
+      fi
+      ;;
+    -v | --volume)
+      shift
+      VOLUME="$1"
+      if ! [[ "$VOLUME" =~ ^[0-9]+$ ]] || [ "$VOLUME" -lt 1 ]; then
+        echo "Volume must be greater than 0"
+        exit 1
+      fi
+      ;;
+    -*)
+      echo "Unknown option: $1"
+      exit 1
+      ;;
+    *)
+      POSITIONAL_ARGS+=("$1")
+      ;;
+    esac
+    shift
+  done
+
+  INPUT_TIME="${POSITIONAL_ARGS[0]}"
+  TITLE="${POSITIONAL_ARGS[1]}"
+}
+
+parse_args "$@"
+
+if [ "$BACKGROUND" = true ]; then
+  FILTERED_ARGS=()
+  for arg in "${ORIGINAL_ARGS[@]}"; do
+    [[ "$arg" != "-b" && "$arg" != "--background" ]] && FILTERED_ARGS+=("$arg")
+  done
+  "$0" "${FILTERED_ARGS[@]}" </dev/null >/dev/null 2>&1 &
+  echo "Timer running in background (PID: $!)"
+  exit 0
+fi
+
+add_to_state() {
+  end_time="$1"
+  echo "$$${DELIMITER}${end_time}${DELIMITER}${TITLE}" >>"$STATE_FILE"
+}
+
+remove_from_state() {
+  pid="$1"
+  if [ -f "$STATE_FILE" ]; then
+    grep -v "^${pid}${DELIMITER}" "$STATE_FILE" >"${STATE_FILE}.tmp" &&
+      mv "${STATE_FILE}.tmp" "$STATE_FILE"
+  fi
+}
+
+list_timers() {
+  if [ ! -f "$STATE_FILE" ]; then
+    echo "No active timers."
+    return
+  fi
+
+  ALL_ACTIVE=true
+  printf "%-8s | %-12s | %-s\n" "PID" "Time Left" "Title"
+  printf '%s\n' "------------------------------------------"
+
+  while IFS= read -r line; do
+    KILLED=false
+    IFS="$DELIMITER" read -r pid end_time title <<<"$line"
+    current_time=$(date +%s)
+
+    if [ "$end_time" -le "$current_time" ]; then
+      remove_from_state "$pid"
+      continue
+    fi
+
+    if ! kill -0 "$pid" 2>/dev/null; then
+      KILLED=true
+      ALL_ACTIVE=false
+    fi
+
+    remaining=$((end_time - current_time))
+    time_str=$(date -u -d "@$remaining" +%H:%M:%S)
+
+    [[ "$KILLED" = true ]] && pid="\x1b[31mKILLED\x1b[0m"
+
+    printf "%-8s | %-12s | %-s\n" "$pid" "$time_str" "$title"
+  done <"$STATE_FILE"
+
+  if [ "$ALL_ACTIVE" = false ]; then
+    err "Some timer's processes were KILLED, happens when you restart your system"
+    warn "Run 'tymr --revive' to revive them. Consider automating this on startup."
+  fi
+}
+
+start_stopwatch() {
   end=$(date +%s)
   while true; do
     time=$(($(date +%s) - end))
     printf '%s\r' "$(date -u -d "@$time" +%H:%M:%S)"
     sleep 0.5
   done
-fi
+}
 
-TIME_OR_SECONDS="${POSITIONAL_ARGS[0]}"
-NOTIF_BODY="${POSITIONAL_ARGS[1]}"
-NOTIF_TITLE="${POSITIONAL_ARGS[2]:-"Time's up!"}"
+start_timer() {
+  end=$(($(date +%s) + $1))
+  add_to_state "$end"
+  while [ "$end" -ge $(date +%s) ]; do
+    time="$((end - $(date +%s)))"
+    [ "$BACKGROUND" = false ] && printf '%s\r' "$(date -u -d "@$time" +%H:%M:%S)" && sleep 0.5
+  done
+}
 
-if [ -z "$TIME_OR_SECONDS" ]; then
-  echo "Invalid input"
-  exit 1
-fi
-
-if [[ "$TIME_OR_SECONDS" == *:* ]]; then
-  target_datetime="$(date +'%Y-%m-%d') $TIME_OR_SECONDS"
-  if ! target_epoch=$(date -d "$target_datetime" +%s 2>/dev/null); then
-    echo "Invalid input: use HH:MM, HH:MM:SS, HH:MMam/pm or seconds"
-    echo "See 'date --help' for more information on valid time formats."
+parse_time_input() {
+  input="$1"
+  if [ -z "$input" ]; then
+    err "No time or seconds provided"
     exit 1
   fi
-  SECONDS=$((target_epoch - $(date +%s)))
 
-  if [ "$SECONDS" -lt 0 ]; then
-    echo "Time $TIME_OR_SECONDS has already passed today"
+  if [[ "$input" =~ ^[0-9]+$ ]]; then
+    echo "$input"
+  elif [[ "$input" =~ ^([0-9]+[dhms])+$ ]]; then
+    to_seconds "$input"
+  elif target_epoch=$(date -d "$INPUT_TIME" +%s 2>/dev/null); then
+    current_epoch=$(date +%s)
+    if [ "$target_epoch" -le "$current_epoch" ]; then
+      err "Specified time is in the past: $input"
+      exit 1
+    fi
+    echo $((target_epoch - current_epoch))
+  else
+    err "Invalid time format: $input"
+    echo "Use one of the following formats:"
+    show_time_format
     exit 1
   fi
-elif [[ "$TIME_OR_SECONDS" =~ ^[0-9]+$ ]] && [ "$TIME_OR_SECONDS" -gt 0 ]; then
-  SECONDS="$TIME_OR_SECONDS"
-else
-  echo "Invalid input: use HH:MM, HH:MM:SS, HH:MMam/pm or seconds"
-  exit 1
-fi
+}
 
-if [ "$BACKGROUND" = true ]; then
-  nohup "$0" ${NO_SOUND:+-n} "$@" >/dev/null 2>&1 &
+if [ $STOPWATCH -eq 1 ]; then
+  start_stopwatch
   exit 0
 fi
 
-# main timer loop
-end=$(($(date +%s) + $SECONDS))
-while [ "$end" -ge $(date +%s) ]; do
-  time="$(($end - $(date +%s)))"
-  [ "$BACKGROUND" = false ] && printf '%s\r' "$(date -u -d "@$time" +%H:%M:%S)" && sleep 0.5
-done
+SECONDS=$(parse_time_input "$INPUT_TIME")
+start_timer "$SECONDS"
 
 if [ "$NO_SOUND" = false ]; then
   VOLUME_FLAG=""
@@ -123,7 +236,7 @@ if [ "$NO_SOUND" = false ]; then
   fi
 fi
 
-notify-send -u critical -w "$NOTIF_TITLE" "$NOTIF_BODY"
+notify-send -u critical -w "Time's Up!" "$TITLE"
 
 if [ "$NO_SOUND" = false ]; then
   kill $SOUND_LOOP_PID
