@@ -10,6 +10,9 @@ STATE_FILE="$HOME/.cache/tymr_state"
 DELIMITER="|"
 ORIGINAL_ARGS=("$@")
 SOUND_LOOP_PID=""
+PLAYER_CMD=""
+PLAYER_VOL_FLAG=""
+PLAYER_VOL_MULTIPLIER=1
 
 cleanup() {
   [ -n "$SOUND_LOOP_PID" ] && kill "$SOUND_LOOP_PID" 2>/dev/null
@@ -27,7 +30,7 @@ warn() {
 }
 
 # check dependencies
-for cmd in date notify-send paplay timeout; do
+for cmd in date notify-send timeout; do
   if ! command -v "$cmd" &>/dev/null; then
     err "Command not found: $cmd. Please install it."
     exit 1
@@ -58,6 +61,24 @@ show_help() {
   echo
   echo "TIME_OR_SECONDS Formats:"
   show_time_format
+}
+detect_player() {
+  if [ "$NO_SOUND" = true ]; then
+    return
+  fi
+  if command -v paplay &>/dev/null; then
+    PLAYER_CMD="paplay"
+    PLAYER_VOL_FLAG="--volume="
+    PLAYER_VOL_MULTIPLIER=655
+  elif command -v mpv &>/dev/null; then
+    PLAYER_CMD="mpv --no-video --no-terminal --no-config --volume="
+  elif command -v ffplay &>/dev/null; then
+    PLAYER_CMD="ffplay -nodisp -autoexit -v quiet"
+    PLAYER_VOL_FLAG="-volume="
+  else
+    err "No suitable audio player found (paplay or aplay). Sound will be disabled."
+    NO_SOUND=true
+  fi
 }
 
 to_seconds() {
@@ -146,6 +167,7 @@ parse_args() {
 }
 
 parse_args "$@"
+detect_player
 
 if [ "$FOREGROUND" = false ]; then
   nohup "$0" --foreground "${ORIGINAL_ARGS[@]}" >/dev/null 2>&1 &
@@ -315,15 +337,22 @@ fi
 SECONDS=$(parse_time_input "$INPUT_TIME")
 start_timer "$SECONDS"
 
+if [ ! -f /usr/share/sounds/freedesktop/stereo/service-login.oga ] || [ ! -f /usr/share/sounds/freedesktop/stereo/service-logout.oga ]; then
+  warn "Default sound files not found. Sound will be disabled."
+  echo "Specify -S / --sound-file with a valid sound file to enable custom sound."
+  NO_SOUND=true
+fi
+
 if [ "$NO_SOUND" = false ]; then
   VOLUME_FLAG=""
   if [ -n "$VOLUME" ]; then
-    VOLUME_FLAG="--volume=$((VOLUME * 655))" # volume in paplay is 0-65536
+    VOL_VALUE=$((VOLUME * PLAYER_VOL_MULTIPLIER))
+    VOLUME_FLAG="$PLAYER_VOL_FLAG$VOL_VALUE"
   fi
 
   if [ -n "$SOUND_FILE" ]; then
     while :; do
-      /usr/bin/paplay $VOLUME_FLAG "$SOUND_FILE"
+      timeout 2 "$PLAYER_CMD" $VOLUME_FLAG "$SOUND_FILE"
     done &
     SOUND_LOOP_PID=$!
   else
