@@ -1,4 +1,4 @@
-#!/bin/env bash
+#!/usr/bin/env bash
 
 BACKGROUND=false
 NO_SOUND=false
@@ -17,6 +17,15 @@ err() {
 warn() {
   echo -e "\e[33m$1\e[0m"
 }
+
+# check dependencies
+for cmd in date notify-send paplay timeout; do
+  if ! command -v $cmd &>/dev/null; then
+    err "Command not found: $cmd. Please install it."
+    exit 1
+  fi
+done
+
 show_time_format() {
   echo "Plain seconds: 300, 1500, etc."
   echo "Duration format: 5m, 2h30m, 1d12h, etc."
@@ -24,7 +33,7 @@ show_time_format() {
   echo "See 'date --help' for more information on valid date/time formats."
 }
 show_help() {
-  echo "Usage: timer [OPTIONS] TIME_OR_SECONDS [TITLE]"
+  echo "Usage: timer [OPTIONS] TIME_OR_SECONDS [TIMER_NAME]"
   echo
   echo "Options:"
   echo "  -s, --stopwatch        Run as stopwatch (counts up)"
@@ -35,8 +44,9 @@ show_help() {
   echo "  -h, --help             Show this help message"
   echo
   echo "  Timers Management:"
-  echo "  -l, --list                 List active timers"
-  echo "  -d, --delete PID_OR_TITLE  Delete timer by PID or Title"
+  echo "  -l, --list                List active timers"
+  echo "  -d, --delete PID_OR_NAME  Delete timer by PID or Timer Name"
+  echo "  -r, --revive              Revive killed timers' processes"
   echo
   echo "TIME_OR_SECONDS Formats:"
   show_time_format
@@ -75,13 +85,17 @@ parse_args() {
       list_timers
       exit 0
       ;;
+    -r | --revive)
+      revive_timers
+      exit 0
+      ;;
     -d | --delete)
       shift
       if [ -z "$1" ]; then
-        err "No PID or Title provided for deletion"
+        err "No PID or Name provided for deletion"
         exit 1
       fi
-      remove_from_state "$1"
+      delete_timer "$1"
       exit 0
       ;;
     -s | --stopwatch) STOPWATCH=1 ;;
@@ -115,10 +129,10 @@ parse_args() {
   done
 
   INPUT_TIME="${POSITIONAL_ARGS[0]}"
-  TITLE="${POSITIONAL_ARGS[1]}"
-  # title mustn't have DELIMITER
-  if [[ "$TITLE" == *"$DELIMITER"* ]]; then
-    err "Title cannot contain the character: $DELIMITER"
+  TIMER_NAME="${POSITIONAL_ARGS[1]}"
+
+  if [[ "$TIMER_NAME" == *"$DELIMITER"* ]]; then
+    err "Name cannot contain the character: $DELIMITER"
     exit 1
   fi
 }
@@ -137,11 +151,12 @@ fi
 
 add_to_state() {
   end_time="$1"
-  echo "$$${DELIMITER}${end_time}${DELIMITER}${TITLE}" >>"$STATE_FILE"
+  echo "$$${DELIMITER}${end_time}${DELIMITER}${TIMER_NAME}" >>"$STATE_FILE"
 }
 
-remove_from_state() {
-  local pid_or_title="$1"
+delete_timer() {
+  local pid_or_name="$1"
+  local kill=${2:-true}
 
   if [ -f "$STATE_FILE" ]; then
     local tmp_file
@@ -150,11 +165,12 @@ remove_from_state() {
     local REMOVED_LINE=""
 
     while IFS= read -r line; do
-      IFS="$DELIMITER" read -r pid end_time title <<<"$line"
+      IFS="$DELIMITER" read -r pid end_time name <<<"$line"
 
       # pid mode
-      if [ "$pid" = "$pid_or_title" ] || [ "$title" = "$pid_or_title" ]; then
-        REMOVED_LINE="PID: $pid, Title: $title"
+      if [ "$pid" = "$pid_or_name" ] || [ "$name" = "$pid_or_name" ]; then
+        REMOVED_LINE="PID: $pid, Name: $name"
+        [ "$kill" = true ] && kill "$pid" 2>/dev/null
         echo -e "\e[32mRemoved timer:\e[0m $REMOVED_LINE"
         continue
       fi
@@ -164,7 +180,7 @@ remove_from_state() {
     mv "$tmp_file" "$STATE_FILE"
 
     if [ -z "$REMOVED_LINE" ]; then
-      err "No matching PID or Title found for '$pid_or_title'"
+      err "No matching PID or Name found for '$pid_or_name'"
     fi
   fi
 }
@@ -174,43 +190,71 @@ list_timers() {
     echo "No active timers."
     return
   fi
-  expired_pids=()
 
   ALL_ACTIVE=true
-  printf "%-8s | %-12s | %-s\n" "PID" "Time Left" "Title"
-  printf '%s\n' "------------------------------------------"
+  printf "%-8s | %-12s | %-12s | %-s\n" "PID" "End Time" "Time Left" "Name"
+  printf '%s\n' "---------------------------------------------------------------"
 
   while IFS= read -r line; do
     KILLED=false
-    IFS="$DELIMITER" read -r pid end_time title <<<"$line"
+    IFS="$DELIMITER" read -r pid end_time name <<<"$line"
     current_time=$(date +%s)
-
-    if [ "$end_time" -le "$current_time" ]; then
-      expired_pids+=("$pid")
-      continue
-    fi
 
     if ! kill -0 "$pid" 2>/dev/null; then
       KILLED=true
       ALL_ACTIVE=false
     fi
 
-    remaining=$((end_time - current_time))
-    time_str=$(date -u -d "@$remaining" +%H:%M:%S)
+    if [ "$end_time" -le "$current_time" ]; then
+      time_left_str=$(warn "EXPIRED")
+    else
+      remaining=$((end_time - current_time))
+      time_left_str=$(date -u -d "@$remaining" +%H:%M:%S)
+    fi
+
+    # Format end_time as hh:mmam/pm
+    end_time_str=$(date -d "@$end_time" +"%I:%M%P")
 
     [[ "$KILLED" = true ]] && pid="\x1b[31mKILLED\x1b[0m"
 
-    printf "%-8s | %-12s | %-s\n" "$pid" "$time_str" "$title"
+    printf "%-8s | %-12s | %-12s | %-s\n" "$pid" "$end_time_str" "$time_left_str" "$name"
   done <"$STATE_FILE"
 
   if [ "$ALL_ACTIVE" = false ]; then
     err "Some timer's processes were KILLED, happens when you restart your system"
-    warn "Run 'tymr --revive' to revive them. Consider automating this on startup."
+    warn "Run 'tymr --revive' to revive them and kill EXPIRED ones.\nConsider automating this on startup."
   fi
 
-  for pid in "${expired_pids[@]}"; do
-    remove_from_state "$pid"
-  done
+}
+
+revive_timers() {
+  if [ ! -f "$STATE_FILE" ]; then
+    echo "No timers to revive."
+    return
+  fi
+
+  tmp_file=$(mktemp)
+
+  while IFS= read -r line; do
+    IFS="$DELIMITER" read -r pid end_time name <<<"$line"
+    current_time=$(date +%s)
+
+    if [ "$end_time" -le "$current_time" ]; then
+      warn "Timer already expired: PID: $pid, Name: $name"
+      notify-send -u critical "Timer expired while system was off" "Timer: $name, On: $(date -d "@$end_time" '"%-d %b %I:%M%P"')"
+      continue
+    fi
+
+    if ! kill -0 "$pid" 2>/dev/null; then
+      remaining=$((end_time - current_time))
+      echo -e "\e[32mReviving timer:\e[0m PID: $pid, Name: $name, Remaining: $(date -u -d "@$remaining" +%H:%M:%S)"
+      "$0" -b "$remaining" "$name"
+    else
+      echo "$line" >>"$tmp_file"
+    fi
+  done <"$STATE_FILE"
+
+  mv "$tmp_file" "$STATE_FILE"
 }
 
 start_stopwatch() {
@@ -225,12 +269,12 @@ start_stopwatch() {
 start_timer() {
   end=$(($(date +%s) + $1))
   add_to_state "$end"
-  while [ "$end" -ge $(date +%s) ]; do
+  while [ "$end" -ge "$(date +%s)" ]; do
     time="$((end - $(date +%s)))"
     [ "$BACKGROUND" = false ] && printf '%s\r' "$(date -u -d "@$time" +%H:%M:%S)"
     sleep 0.5
   done
-  remove_from_state "$$"
+  delete_timer "$$" false
 }
 
 parse_time_input() {
@@ -287,7 +331,7 @@ if [ "$NO_SOUND" = false ]; then
   fi
 fi
 
-notify-send -u critical -w "Time's Up!" "$TITLE"
+notify-send -u critical -w "Time's Up!" "$TIMER_NAME"
 
 if [ "$NO_SOUND" = false ]; then
   kill $SOUND_LOOP_PID
