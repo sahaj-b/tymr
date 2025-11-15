@@ -9,6 +9,7 @@ POSITIONAL_ARGS=()
 STATE_FILE="$HOME/.cache/tymr_state"
 DELIMITER="|"
 ORIGINAL_ARGS=("$@")
+SOUND_LOOP_PID=""
 
 err() {
   echo -e "\e[31m$1\e[0m" >&2
@@ -32,6 +33,10 @@ show_help() {
   echo "  -f, --sound-file PATH  Custom sound file to loop"
   echo "  -v, --volume VOL       Set volume"
   echo "  -h, --help             Show this help message"
+  echo
+  echo "  Timers Management:"
+  echo "  -l, --list                 List active timers"
+  echo "  -d, --delete PID_OR_TITLE  Delete timer by PID or Title"
   echo
   echo "TIME_OR_SECONDS Formats:"
   show_time_format
@@ -66,6 +71,19 @@ parse_args() {
       show_help
       exit 0
       ;;
+    -l | --list)
+      list_timers
+      exit 0
+      ;;
+    -d | --delete)
+      shift
+      if [ -z "$1" ]; then
+        err "No PID or Title provided for deletion"
+        exit 1
+      fi
+      remove_from_state "$1"
+      exit 0
+      ;;
     -s | --stopwatch) STOPWATCH=1 ;;
     -b | --background) BACKGROUND=true ;;
     -n | --no-sound) NO_SOUND=true ;;
@@ -98,6 +116,11 @@ parse_args() {
 
   INPUT_TIME="${POSITIONAL_ARGS[0]}"
   TITLE="${POSITIONAL_ARGS[1]}"
+  # title mustn't have DELIMITER
+  if [[ "$TITLE" == *"$DELIMITER"* ]]; then
+    err "Title cannot contain the character: $DELIMITER"
+    exit 1
+  fi
 }
 
 parse_args "$@"
@@ -118,10 +141,31 @@ add_to_state() {
 }
 
 remove_from_state() {
-  pid="$1"
+  local pid_or_title="$1"
+
   if [ -f "$STATE_FILE" ]; then
-    grep -v "^${pid}${DELIMITER}" "$STATE_FILE" >"${STATE_FILE}.tmp" &&
-      mv "${STATE_FILE}.tmp" "$STATE_FILE"
+    local tmp_file
+    tmp_file=$(mktemp)
+
+    local REMOVED_LINE=""
+
+    while IFS= read -r line; do
+      IFS="$DELIMITER" read -r pid end_time title <<<"$line"
+
+      # pid mode
+      if [ "$pid" = "$pid_or_title" ] || [ "$title" = "$pid_or_title" ]; then
+        REMOVED_LINE="PID: $pid, Title: $title"
+        echo -e "\e[32mRemoved timer:\e[0m $REMOVED_LINE"
+        continue
+      fi
+      echo "$line" >>"$tmp_file"
+    done <"$STATE_FILE"
+
+    mv "$tmp_file" "$STATE_FILE"
+
+    if [ -z "$REMOVED_LINE" ]; then
+      err "No matching PID or Title found for '$pid_or_title'"
+    fi
   fi
 }
 
@@ -130,6 +174,7 @@ list_timers() {
     echo "No active timers."
     return
   fi
+  expired_pids=()
 
   ALL_ACTIVE=true
   printf "%-8s | %-12s | %-s\n" "PID" "Time Left" "Title"
@@ -141,7 +186,7 @@ list_timers() {
     current_time=$(date +%s)
 
     if [ "$end_time" -le "$current_time" ]; then
-      remove_from_state "$pid"
+      expired_pids+=("$pid")
       continue
     fi
 
@@ -162,6 +207,10 @@ list_timers() {
     err "Some timer's processes were KILLED, happens when you restart your system"
     warn "Run 'tymr --revive' to revive them. Consider automating this on startup."
   fi
+
+  for pid in "${expired_pids[@]}"; do
+    remove_from_state "$pid"
+  done
 }
 
 start_stopwatch() {
@@ -178,8 +227,10 @@ start_timer() {
   add_to_state "$end"
   while [ "$end" -ge $(date +%s) ]; do
     time="$((end - $(date +%s)))"
-    [ "$BACKGROUND" = false ] && printf '%s\r' "$(date -u -d "@$time" +%H:%M:%S)" && sleep 0.5
+    [ "$BACKGROUND" = false ] && printf '%s\r' "$(date -u -d "@$time" +%H:%M:%S)"
+    sleep 0.5
   done
+  remove_from_state "$$"
 }
 
 parse_time_input() {
@@ -219,7 +270,7 @@ start_timer "$SECONDS"
 if [ "$NO_SOUND" = false ]; then
   VOLUME_FLAG=""
   if [ -n "$VOLUME" ]; then
-    VOLUME_FLAG="--volume=$((VOLUME * 655))"
+    VOLUME_FLAG="--volume=$((VOLUME * 655))" # volume in paplay is 0-65536
   fi
 
   if [ -n "$SOUND_FILE" ]; then
