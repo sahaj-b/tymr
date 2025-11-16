@@ -1,5 +1,5 @@
 # tymr
-A stateful, general purpose timer/alarm CLI. It runs in the background, survives reboots, and understands human time.
+A stateful, general purpose timer/alarm CLI for Linux. It runs in the background, survives reboots, and understands human time.
 
 
 ## Features
@@ -11,6 +11,7 @@ A stateful, general purpose timer/alarm CLI. It runs in the background, survives
 - **Notifications:** Uses `notify-send` when a timer is up.
 - **Sound Alarm:** Plays a looping sound until the notification is dismissed.
 - **Configurable:** Set your own sound files, default volume, or even custom player commands in `~/.config/tymr/config`.
+- **Remote Fallback:** Optionally send a push notification to your phone(or any other device) via [ntfy.sh](https://ntfy.sh)
 
 ## Installation
 This is a Bash script, so installation is simple:
@@ -34,14 +35,17 @@ cp tymr-revive.service ~/.config/systemd/user/tymr-revive.service
 
 # Enable & start the service
 systemctl --user daemon-reload
-systemctl --user enable --now tymr-revive
+systemctl --user enable tymr-revive
 ```
 
 ##  Dependencies
 - `date` (GNU coreutils version, usually pre-installed on Linux)
 - `notify-send` (from `libnotify` or similar)
-- **For interactive delete (optional):** `fzf`
-- **For sound (optional):** `paplay`, `ffplay`, or `mpv`. `tymr` auto-detects them.
+
+### Optional stuff
+- `curl` (for `ntfy.sh` integration)
+- `fzf`: for interactive timer deletion
+- `paplay` / `ffplay` / `mpv`: for sound alarms. `tymr` auto-detects them.
 
 ##  Usage
 
@@ -50,12 +54,13 @@ USAGE:
   timer [OPTIONS] TIME/DURATION [TIMER_NAME]
 
 OPTIONS:
-  -s, --stopwatch        Run as stopwatch (counts up)
-  -f, --foreground       Run timer in foreground
-  -n, --no-sound         Disable alarm sound
-  -S, --sound-file PATH  Custom sound file to loop
-  -v, --volume VOL       Set volume (1-100)
-  -h, --help             Show this help message
+  -s, --stopwatch         Run as stopwatch (counts up)
+  -f, --foreground        Run timer in foreground
+  -n, --no-sound          Disable alarm sound
+  -S, --sound-file PATH   Custom sound file to loop
+  -v, --volume VOL        Set volume (1-100)
+  -t, --ntfy-topic TOPIC  Send a fallback push via ntfy.sh/TOPIC
+  -h, --help              Show this help message
 
 TIMER MANAGEMENT:
    -l, --list               List active timers
@@ -125,6 +130,17 @@ tymr -d 12345
 tymr -D
 ```
 
+### Fallback push notifications via ntfy.sh
+- [ntfy.sh](https://ntfy.sh) is a notification service that can send push notifications to your devices
+- Install the app on your phone(or other devices) and subscribe to a topic
+- Use `-t TOPIC`(or specify in config) to send a push notification to that topic when the timer is up
+```bash
+tymr -t my-phone-tymr-notif 10m "Meeting in 10 minutes"
+```
+
+> [!WARNING]
+> Once the timer is up, the ntfy push notification can't be dismissed, even if you delete the timer using `tymr -d`
+
 ### Configuration File
 Create `~/.config/tymr/config` to set defaults.  
 [default-config.sh](default-config.sh):
@@ -142,4 +158,6 @@ DELIMITER="|"                        # Delimiter for separating fields in the st
 PLAYER_CMD=""           # Command to play sound
 PLAYER_VOL_FLAG=""      # Volume flag for the player command (eg, "--volume ")
 PLAYER_VOL_MULTIPLIER=1 # Multiplier for volume
+
+NTFY_TOPIC="" # Default notification topic for ntfy.sh
 ```
