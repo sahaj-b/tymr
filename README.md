@@ -1,6 +1,7 @@
 # tymr
 A stateful, general purpose timer/alarm CLI for Linux. It runs in the background, survives reboots, and understands human time.
 
+https://github.com/user-attachments/assets/092a40f8-1155-435b-90e2-8d7634168250
 
 ## Features
 
@@ -8,10 +9,10 @@ A stateful, general purpose timer/alarm CLI for Linux. It runs in the background
 - **Smart Time Parsing:** Understands `5m`, `2h30m`, `17:30`, `8:00pm`, `+2 days 14:00`, and more (anything `date` understands).
 - **Stateful:** Timers/Alarms are tracked. `tymr` provides commands to list, cancel, or revive them (from a reboot).
 - **Stopwatch Mode:** `tymr -s` counts up until you `Ctrl+C`.
-- **Notifications:** Uses `notify-send` when a timer is up.
+- **Notifications:** Uses `notify-send` to send permanent notifications when a timer is up.
 - **Sound Alarm:** Plays a looping sound until the notification is dismissed.
 - **Configurable:** Set your own sound files, default volume, or even custom player commands in `~/.config/tymr/config`.
-- **Remote Fallback:** Optionally send a push notification to your phone(or any other device) via [ntfy.sh](https://ntfy.sh)
+- **Remote Notications:** Optionally send a push notification to your phone(or any other device) via [ntfy.sh](https://ntfy.sh)
 
 ## Installation
 This is a Bash script, so installation is simple:
