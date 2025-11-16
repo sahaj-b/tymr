@@ -11,3 +11,5 @@ DELIMITER="|"                        # Delimiter for separating fields in the st
 PLAYER_CMD=""           # Command to play sound
 PLAYER_VOL_FLAG=""      # Volume flag for the player command (eg, "--volume ")
 PLAYER_VOL_MULTIPLIER=1 # Multiplier for volume
+
+NTFY_TOPIC="" # Default notification topic for ntfy.sh

@@ -14,6 +14,7 @@ PLAYER_CMD=""
 PLAYER_VOL_FLAG=""
 PLAYER_VOL_MULTIPLIER=1
 CONFIG_FILE="$HOME/.config/tymr/config"
+NTFY_TOPIC=""
 
 if [ -f "$CONFIG_FILE" ]; then
   # shellcheck source=/dev/null
@@ -98,17 +99,18 @@ show_help() {
   echo -e "  timer ${C_DIM}[OPTIONS]${C_RESET} ${C_YELLOW}TIME/DURATION${C_RESET} ${C_DIM}[TIMER_NAME]${C_RESET}"
   echo
   echo -e "${C_BOLD}OPTIONS:${C_RESET}"
-  opt "-s, --stopwatch       " "Run as stopwatch (counts up)"
-  opt "-f, --foreground      " "Run timer in foreground"
-  opt "-n, --no-sound        " "Disable alarm sound"
-  opt "-S, --sound-file PATH " "Custom sound file to loop"
-  opt "-v, --volume VOL      " "Set volume (1-100)"
-  opt "-h, --help            " "Show this help message"
+  opt "-s, --stopwatch        " "Run as stopwatch (counts up)"
+  opt "-f, --foreground       " "Run timer in foreground"
+  opt "-n, --no-sound         " "Disable alarm sound"
+  opt "-S, --sound-file PATH  " "Custom sound file to loop"
+  opt "-v, --volume VOL       " "Set volume (1-100)"
+  opt "-t, --ntfy-topic TOPIC " "Send a fallback push via ntfy.sh/TOPIC"
+  opt "-h, --help             " "Show this help message"
   echo
   echo -e "${C_BOLD}TIMER MANAGEMENT:${C_RESET}"
-  opt "-l, --list               " "List active timers"
-  opt "-d, --delete [PID/NAME]  " "Delete timer. Runs in interactive mode(fzf) if no arg"
-  opt "-r, --revive             " "Revive killed timers' processes"
+  opt "-l, --list              " "List active timers"
+  opt "-d, --delete [PID/NAME] " "Delete timer. Runs in interactive mode(fzf) if no arg"
+  opt "-r, --revive            " "Revive killed timers' processes"
   echo
   echo -e "${C_BOLD}TIME/DURATION FORMATS:${C_RESET}"
   show_time_format
@@ -204,6 +206,15 @@ parse_time_input() {
     show_time_format >&2
     return 1
   fi
+}
+
+push_ntfy() {
+  local message="$1"
+  local delay="$2"
+  curl -d "$message" \
+    "https://ntfy.sh/${NTFY_TOPIC}" \
+    -H "Title: tymr: Time's up!" \
+    -H "Delay: ${delay}"
 }
 
 add_to_state() {
@@ -442,6 +453,14 @@ parse_args() {
     -s | --stopwatch) STOPWATCH=1 ;;
     -f | --foreground) FOREGROUND=true ;;
     -n | --no-sound) NO_SOUND=true ;;
+    -t | --ntfy-topic)
+      shift
+      NTFY_TOPIC="$1"
+      if [ -z "$NTFY_TOPIC" ]; then
+        err "No topic provided for --ntfy-topic"
+        exit 1
+      fi
+      ;;
     -S | --sound-file)
       shift
       SOUND_FILE="$1"
@@ -537,7 +556,12 @@ fi
 if ! SECONDS=$(parse_time_input "$INPUT_TIME"); then
   exit 1
 fi
+
+target_epoch=$(($(date +%s) + SECONDS))
+[ -n "$NTFY_TOPIC" ] && push_ntfy "${TIMER_NAME:-"Timer finished"}" "$target_epoch"
+
 start_timer "$SECONDS"
+
 set -m # enable job control. Needed for killing process groups(SOUND_LOOP_PGID)
 if [ "$NO_SOUND" = false ]; then
   VOLUME_ARGS=""
