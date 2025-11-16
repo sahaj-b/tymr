@@ -30,27 +30,33 @@ if [ -n "$NO_COLOR" ]; then
   C_DIM=""
   C_RESET=""
 else
-  C_RED="\e[31m"
-  C_GREEN="\e[32m"
-  C_YELLOW="\e[33m"
-  C_MAGENTA="\e[35m"
-  C_CYAN="\e[36m"
-  C_BOLD="\e[1m"
-  C_DIM="\e[37m"
-  C_RESET="\e[0m"
+  C_RED="\x1b[31m"
+  C_GREEN="\x1b[32m"
+  C_YELLOW="\x1b[33m"
+  C_MAGENTA="\x1b[35m"
+  C_CYAN="\x1b[36m"
+  C_BOLD="\x1b[1m"
+  C_DIM="\x1b[37m"
+  C_RESET="\x1b[0m"
 fi
 
 cleanup() {
+  local sigint_received=${1:-false}
   [ -n "$SOUND_LOOP_PGID" ] && kill -- -"$SOUND_LOOP_PGID" 2>/dev/null
-  # [ -n "$$" ] && delete_timer "$$" false 2>/dev/null
-  # dont delete timer so it can be revived later
 
-  # rethrow SIGINT to let parent process also handle it, useful when tymr is in a loop and user do Ctrl+C
-  trap - INT
-  kill -INT $$
+  if [ "$sigint_received" = true ]; then
+    # only delete timer if user ctrl+c'ed directly
+    [ -n "$$" ] && delete_timer "$$" false 2>/dev/null
+    # rethrow SIGINT to let parent process also handle it, useful when tymr is in a loop and user do Ctrl+C
+    trap - INT
+    kill -INT $$
+  else
+    exit 0
+  fi
 }
 
-trap cleanup INT TERM
+trap cleanup TERM HUP
+trap 'cleanup true' INT
 
 err() {
   echo -e "${C_RED}✗ $1${C_RESET}" >&2
@@ -101,7 +107,7 @@ show_help() {
   echo
   echo -e "${C_BOLD}TIMER MANAGEMENT:${C_RESET}"
   opt "-l, --list               " "List active timers"
-  opt "-d, --delete PID_OR_NAME " "Delete timer by PID or Timer Name"
+  opt "-d, --delete [PID/NAME]  " "Delete timer. Runs in interactive mode(fzf) if no arg"
   opt "-r, --revive             " "Revive killed timers' processes"
   echo
   echo -e "${C_BOLD}TIME/DURATION FORMATS:${C_RESET}"
@@ -134,6 +140,7 @@ detect_player() {
     NO_SOUND=true
   fi
 }
+
 check_sound_files() {
   if [ -n "$SOUND_FILE" ]; then
     if [ ! -f "$SOUND_FILE" ]; then
@@ -205,8 +212,12 @@ add_to_state() {
 }
 
 delete_timer() {
-  local pid_or_name="$1"
-  local kill=${2:-true}
+  local pid_or_name_or_line="$1"
+  if [ -z "$pid_or_name_or_line" ]; then
+    err "No PID or Name provided for deletion"
+    return 1
+  fi
+  local self_call=${2:-true}
 
   if [ -f "$STATE_FILE" ]; then
     local tmp_file
@@ -215,13 +226,38 @@ delete_timer() {
     local REMOVED_LINE=""
 
     while IFS= read -r line; do
+      local is_killed=false
       IFS="$DELIMITER" read -r pid end_time name <<<"$line"
+      if [ -z "$name" ]; then
+        name="(no name)"
+      fi
 
-      if [ "$pid" = "$pid_or_name" ] || [ "$name" = "$pid_or_name" ]; then
+      if ! kill -0 "$pid" 2>/dev/null; then
+        is_killed=true
+      fi
+
+      if [ "$pid" = "$pid_or_name_or_line" ]; then
         REMOVED_LINE="${C_CYAN}$name${C_RESET} ${C_DIM}(PID: $pid)${C_RESET}"
-        [ "$kill" = true ] && kill "$pid" 2>/dev/null
-        [ "$kill" = true ] && success "Removed timer: $REMOVED_LINE"
-        continue
+        if [ $is_killed = false ]; then
+          # only remove alive processes, coz user never sees PID of killed ones
+          # only way to delete killed ones is via name or full line(fzf)
+          [ "$self_call" = true ] && kill "$pid" 2>/dev/null
+          [ "$self_call" = true ] && success "Removed timer: $REMOVED_LINE"
+          continue
+        fi
+
+      elif [ "$name" = "$pid_or_name_or_line" ] || [ "$line" = "$pid_or_name_or_line" ]; then
+        if [ $is_killed = true ]; then
+          REMOVED_LINE="${C_CYAN}$name${C_RESET}"
+          [ "$self_call" = true ] && success "Removed Killed timer: $REMOVED_LINE"
+          continue
+        else
+          REMOVED_LINE="${C_CYAN}$name${C_RESET} ${C_DIM}(PID: $pid)${C_RESET}"
+          [ "$self_call" = true ] && kill "$pid" 2>/dev/null
+          [ "$self_call" = true ] && success "Removed timer: $REMOVED_LINE"
+          continue
+        fi
+
       fi
       echo "$line" >>"$tmp_file"
     done <"$STATE_FILE"
@@ -229,7 +265,7 @@ delete_timer() {
     mv "$tmp_file" "$STATE_FILE"
 
     if [ -z "$REMOVED_LINE" ]; then
-      err "No matching PID or Name found for '$pid_or_name'"
+      err "No matching PID or Name found for '$pid_or_name_or_line'"
     fi
   fi
 }
@@ -240,9 +276,21 @@ list_timers() {
     return
   fi
 
+  local for_fzf=${1:-false}
+  local header
+  header=$(printf "${C_BOLD}%-8s │ %-15s │ %-10s │ %-s${C_RESET}" "PID" "End Time" "Time Left" "Name")
+
+  if [ "$for_fzf" = true ]; then
+    # dummy header for fzf to consume
+    printf "HEADER\t%s\n" "$header"
+  else
+    printf "%s\n" "$header"
+    echo "─────────┼─────────────────┼────────────┼────────────────────"
+  fi
+
+  # printf "%s\n" "$header"
+  # [ "$for_fzf" == "false" ] && echo "─────────┼─────────────────┼────────────┼────────────────────"
   ALL_ACTIVE=true
-  printf "${C_BOLD}%-8s │ %-15s │ %-10s │ %-s${C_RESET}\n" "PID" "End Time" "Time Left" "Name"
-  echo "─────────┼─────────────────┼────────────┼────────────────────"
 
   while IFS= read -r line; do
     IFS="$DELIMITER" read -r pid end_time name <<<"$line"
@@ -268,29 +316,73 @@ list_timers() {
       local days=$((remaining / 86400))
       local hours=$(((remaining % 86400) / 3600))
       local minutes=$(((remaining % 3600) / 60))
+      local seconds=$((remaining % 60))
 
       time_left_val=""
       [ "$days" -gt 0 ] && time_left_val="${days}d "
       [ "$hours" -gt 0 ] && time_left_val="${time_left_val}${hours}h "
       [ "$minutes" -gt 0 ] && time_left_val="${time_left_val}${minutes}m"
+      if [ "$days" -eq 0 ] && [ "$hours" -eq 0 ] && [ "$minutes" -lt 1 ]; then
+        time_left_val="${time_left_val}${seconds}s"
+      fi
       time_left_val="${time_left_val# }"
       time_left_color="$C_GREEN"
     fi
 
     end_time_str=$(date -d "@$end_time" +"%-d %b %I:%M%P")
 
-    printf "${pid_color}%-8s${C_RESET} │ %-15s │ ${time_left_color}%-10s${C_RESET} │ ${C_MAGENTA}%s${C_RESET}\n" \
-      "$pid_val" "$end_time_str" "$time_left_val" "$name"
+    # --- Final Formatting ---
+    local formatted_line
+    formatted_line=$(printf "${pid_color}%-8s${C_RESET} │ %-15s │ ${time_left_color}%-10s${C_RESET} │ ${C_MAGENTA}%s${C_RESET}" \
+      "$pid_val" "$end_time_str" "$time_left_val" "$name")
 
+    if [ "$for_fzf" = true ]; then
+      # $line is used as the unique identifier for deletion
+      printf "%s\t%s\n" "$line" "$formatted_line"
+    else
+      printf "%s\n" "$formatted_line"
+    fi
   done <"$STATE_FILE"
 
-  if [ "$ALL_ACTIVE" = false ]; then
+  if [ "$ALL_ACTIVE" = false ] && [ "$for_fzf" = false ]; then
     echo
     err "Some timer processes were KILLED (happens after system restart)"
     warn "Run ${C_BOLD}tymr --revive${C_RESET}${C_YELLOW} to restore them and clean up EXPIRED ones"
     dim "Consider automating that on startup"
   fi
 
+}
+
+delete_timer_interactive() {
+  if ! command -v fzf &>/dev/null; then
+    err "fzf not found. Please install fzf to use interactive deletion."
+    exit 1
+  fi
+
+  if [ ! -f "$STATE_FILE" ]; then
+    info "No active timers."
+    return
+  fi
+
+  local selected
+  selected=$(
+    list_timers true | fzf --height 50% --layout reverse --info=inline --multi \
+      --ansi --delimiter='\t' --header-lines=1 --with-nth=2 --accept-nth=1
+  )
+
+  if [ -z "$selected" ]; then
+    info "No timer selected."
+    return
+  fi
+
+  local lines_to_delete=()
+  while IFS= read -r line; do
+    lines_to_delete+=("$line")
+  done <<<"$selected"
+
+  for id_line in "${lines_to_delete[@]}"; do
+    delete_timer "$id_line"
+  done
 }
 
 revive_timers() {
@@ -307,7 +399,7 @@ revive_timers() {
 
     if [ "$end_time" -le "$current_time" ]; then
       warn "Timer expired: ${C_MAGENTA}$name${C_RESET}${C_YELLOW} ${C_DIM}(PID: $pid)${C_RESET}"
-      notify-send -u critical "Timer expired while system was off" "Timer: $name, On: $(date -d "@$end_time" '%-d %b %I:%M%P')"
+      notify-send -u critical "Timer expired while system was off" "Name: $name\n On: $(date -d "@$end_time" +'%-d %b %I:%M%P')"
       continue
     fi
 
@@ -341,8 +433,8 @@ parse_args() {
     -d | --delete)
       shift
       if [ -z "$1" ]; then
-        err "No PID or Name provided for deletion"
-        exit 1
+        delete_timer_interactive
+        exit 0
       fi
       delete_timer "$1"
       exit 0
@@ -396,7 +488,24 @@ if [ "$FOREGROUND" = false ] && [ $STOPWATCH -eq 0 ]; then
     exit 1
   fi
   nohup "$0" --foreground "${ORIGINAL_ARGS[@]}" >/dev/null 2>&1 &
-  success "Timer started in background ${C_DIM}(PID: $!)${C_RESET}"
+  BG_PID=$!
+  end_time=$(($(date +%s) + SECONDS))
+  end_time_str=$(date -d "@$end_time" +"%-d %b %I:%M%P")
+
+  remaining=$SECONDS
+  time_left_val=""
+  [ "$remaining" -ge 86400 ] && time_left_val="$((remaining / 86400))d " && remaining=$((remaining % 86400))
+  [ "$remaining" -ge 3600 ] && time_left_val="${time_left_val}$((remaining / 3600))h " && remaining=$((remaining % 3600))
+  [ "$remaining" -ge 60 ] && time_left_val="${time_left_val}$((remaining / 60))m" && remaining=$((remaining % 60))
+  [ -z "$time_left_val" ] && [ "$remaining" -gt 0 ] && time_left_val="${remaining}s"
+  time_left_val="${time_left_val# }"
+
+  if [ -z "$TIMER_NAME" ]; then
+    success "Timer started"
+  else
+    success "Timer '${C_YELLOW}$TIMER_NAME${C_GREEN}' started"
+  fi
+  echo -e "PID: ${C_YELLOW}$BG_PID${C_RESET}, End Time: ${C_YELLOW}$end_time_str${C_RESET}, Time Left: ${C_YELLOW}$time_left_val${C_RESET}"
   exit 0
 fi
 
