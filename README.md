@@ -40,6 +40,7 @@ systemctl --user enable --now tymr-revive
 ##  Dependencies
 - `date` (GNU coreutils version, usually pre-installed on Linux)
 - `notify-send` (from `libnotify` or similar)
+- **For interactive delete (optional):** `fzf`
 - **For sound (optional):** `paplay`, `ffplay`, or `mpv`. `tymr` auto-detects them.
 
 ##  Usage
@@ -49,17 +50,17 @@ USAGE:
   timer [OPTIONS] TIME/DURATION [TIMER_NAME]
 
 OPTIONS:
-  -s, --stopwatch         Run as stopwatch (counts up)
-  -f, --foreground        Run timer in foreground
-  -n, --no-sound          Disable alarm sound
-  -S, --sound-file PATH   Custom sound file to loop
-  -v, --volume VOL        Set volume (1-100)
-  -h, --help              Show this help message
+  -s, --stopwatch        Run as stopwatch (counts up)
+  -f, --foreground       Run timer in foreground
+  -n, --no-sound         Disable alarm sound
+  -S, --sound-file PATH  Custom sound file to loop
+  -v, --volume VOL       Set volume (1-100)
+  -h, --help             Show this help message
 
 TIMER MANAGEMENT:
-  -l, --list                 List active timers
-  -d, --delete PID_OR_NAME   Delete timer by PID or Timer Name
-  -r, --revive               Revive killed timers' processes
+   -l, --list               List active timers
+   -d, --delete [PID/NAME]  Delete timer. Runs in interactive mode(fzf) if no arg
+   -r, --revive             Revive killed timers' processes
 
 TIME/DURATION FORMATS:
   Plain seconds:    300, 1500, etc.
@@ -119,6 +120,9 @@ tymr -l
 # Delete a specific timer by name or PID
 tymr -d "Pomodoro"
 tymr -d 12345
+
+# Delete a timer interactively (fuzzy search + select)
+tymr -D
 ```
 
 ### Configuration File
