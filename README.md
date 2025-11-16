@@ -21,22 +21,12 @@ cd tymr
 sudo mv tymr /usr/local/bin/tymr
 ```
 
-### Auto-Revive on Reboot (Systemd)
+### Auto-Revive on Reboot
 Timers survive reboots, but their processes are killed. Use `--revive` flag to:  
 - Revive/Start the processes
 - Notify for expired timers (when the system was off)
 
-You can either autostart `tymr --revive` via your DE/WMs autostart settings, or use systemd service as shown below.
-#### Setting up systemd service for auto-revive on startup
-```bash
-# Copy the systemd service file in this repo to user directory
-mkdir -p ~/.config/systemd/user/
-cp tymr-revive.service ~/.config/systemd/user/tymr-revive.service
-
-# Enable & start the service
-systemctl --user daemon-reload
-systemctl --user enable tymr-revive
-```
+Autostart `tymr --revive` via your DE/WMs autostart settings. Eg, for hyprland, `exec-once = tymr --revive` in `~/.config/hyprland/hyprland.conf`.
 
 ##  Dependencies
 - `date` (GNU coreutils version, usually pre-installed on Linux)
