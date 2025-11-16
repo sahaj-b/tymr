@@ -282,7 +282,7 @@ delete_timer() {
 }
 
 list_timers() {
-  if [ ! -f "$STATE_FILE" ]; then
+  if [ ! -f "$STATE_FILE" ] || [ ! -s "$STATE_FILE" ]; then
     info "No active timers."
     return
   fi
@@ -303,9 +303,12 @@ list_timers() {
   # [ "$for_fzf" == "false" ] && echo "─────────┼─────────────────┼────────────┼────────────────────"
   ALL_ACTIVE=true
 
-  while IFS= read -r line; do
-    IFS="$DELIMITER" read -r pid end_time name <<<"$line"
-    current_time=$(date +%s)
+   while IFS= read -r line; do
+     IFS="$DELIMITER" read -r pid end_time name <<<"$line"
+     if [ -z "$name" ]; then
+       name="(no name)"
+     fi
+     current_time=$(date +%s)
 
     # --- PID Processing ---
     local pid_val="$pid"
@@ -529,6 +532,9 @@ if [ "$FOREGROUND" = false ] && [ $STOPWATCH -eq 0 ]; then
 fi
 
 start_stopwatch() {
+  stty -echoctl
+  trap 'stty echoctl; cleanup true' INT
+  trap 'stty echoctl; cleanup false' TERM HUP
   end=$(date +%s)
   while true; do
     time=$(($(date +%s) - end))
@@ -540,11 +546,15 @@ start_stopwatch() {
 start_timer() {
   end=$(($(date +%s) + $1))
   add_to_state "$end"
+  [ "$FOREGROUND" = true ] && stty -echoctl
+  [ "$FOREGROUND" = true ] && trap 'stty echoctl; cleanup true' INT
+  [ "$FOREGROUND" = true ] && trap 'stty echoctl; cleanup false' TERM HUP
   while [ "$end" -ge "$(date +%s)" ]; do
     time="$((end - $(date +%s)))"
     [ "$FOREGROUND" = true ] && printf "${C_GREEN}${C_BOLD}%s${C_RESET}\r" "$(date -u -d "@$time" +%H:%M:%S)"
     sleep 0.5
   done
+  [ "$FOREGROUND" = true ] && stty echoctl
   delete_timer "$$" false
 }
 
