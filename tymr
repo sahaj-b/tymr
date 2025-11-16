@@ -359,7 +359,6 @@ list_timers() {
     echo
     err "Some timer processes were KILLED (happens after system restart)"
     warn "Run ${C_BOLD}tymr --revive${C_RESET}${C_YELLOW} to restore them and clean up EXPIRED ones"
-    dim "Consider automating that on startup"
   fi
 
 }
@@ -406,11 +405,12 @@ revive_timers() {
 
   while IFS= read -r line; do
     IFS="$DELIMITER" read -r pid end_time name <<<"$line"
+    [ -z "$name" ] && name="(no name)"
     current_time=$(date +%s)
 
     if [ "$end_time" -le "$current_time" ]; then
       warn "Timer expired: ${C_MAGENTA}$name${C_RESET}${C_YELLOW} ${C_DIM}(PID: $pid)${C_RESET}"
-      notify-send -u critical "Timer expired while system was off" "Name: $name\n On: $(date -d "@$end_time" +'%-d %b %I:%M%P')"
+      notify-send -u critical "Timer expired while system was off" "Name: $name\nOn: $(date -d "@$end_time" +'%-d %b %I:%M%P')"
       continue
     fi
 
