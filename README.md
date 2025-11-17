@@ -118,7 +118,7 @@ tymr -d "Pomodoro"
 tymr -d 12345
 
 # Delete a timer interactively (fuzzy search + select)
-tymr -D
+tymr -d
 ```
 
 ### Fallback push notifications via ntfy.sh
