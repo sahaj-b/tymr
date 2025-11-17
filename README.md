@@ -50,7 +50,8 @@ OPTIONS:
   -n, --no-sound          Disable alarm sound
   -S, --sound-file PATH   Custom sound file to loop
   -v, --volume VOL        Set volume (1-100)
-  -t, --ntfy-topic TOPIC  Send a fallback push via ntfy.sh/TOPIC
+  -N, --ntfy-topic TOPIC  Send a fallback push via ntfy.sh/TOPIC
+  -t, --timeout MILISEC   Set notification/sound timeout in miliseconds(0=infinite)
   -h, --help              Show this help message
 
 TIMER MANAGEMENT:
@@ -103,9 +104,10 @@ tymr '+2 days 5:00pm' "Review deadline"
 tymr 'December 25 00:00' "Christmas"
 
 # Mix with custom options
-tymr -v 75 18:30 "Volume 75%, alarm at 18:30"
-tymr -n 25m "Silent focus mode"
-tymr -S /path/to/myAlarm.wav 10m "Custom sound alarm"
+tymr -v 75 18:30 "Volume 75%, alarm at 18:30" # 75% volume
+tymr -n 25m "Silent focus mode" # No sound
+tymr -S /path/to/myAlarm.wav 10m "Custom sound alarm" # Custom sound file
+tymr 45m "check oven" -t 5000  # Auto-dismiss notification/sound after 5 seconds
 ```
 
 ### Managing Timers
@@ -124,9 +126,9 @@ tymr -d
 ### Fallback push notifications via ntfy.sh
 - [ntfy.sh](https://ntfy.sh) is a notification service that can send push notifications to your devices
 - Install the app on your phone(or other devices) and subscribe to a topic
-- Use `-t TOPIC`(or specify in config) to send a push notification to that topic when the timer is up
+- Use `-N TOPIC`(or specify in config) to send a push notification to that topic when the timer is up
 ```bash
-tymr -t my-phone-tymr-notif 10m "Meeting in 10 minutes"
+tymr -N my-phone-tymr-notif 10m "Meeting in 10 minutes"
 ```
 
 > [!WARNING]
