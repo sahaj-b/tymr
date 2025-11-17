@@ -15,6 +15,7 @@ PLAYER_VOL_FLAG=""
 PLAYER_VOL_MULTIPLIER=1
 CONFIG_FILE="$HOME/.config/tymr/config"
 NTFY_TOPIC=""
+TIMEOUT=0
 
 if [ -f "$CONFIG_FILE" ]; then
   # shellcheck source=/dev/null
@@ -104,7 +105,8 @@ show_help() {
   opt "-n, --no-sound         " "Disable alarm sound"
   opt "-S, --sound-file PATH  " "Custom sound file to loop"
   opt "-v, --volume VOL       " "Set volume (1-100)"
-  opt "-t, --ntfy-topic TOPIC " "Send a fallback push via ntfy.sh/TOPIC"
+  opt "-t, --timeout MILISEC  " "Set notification/sound timeout in milliseconds(0=infinite)"
+  opt "-N, --ntfy-topic TOPIC " "Send a fallback push via ntfy.sh/TOPIC"
   opt "-h, --help             " "Show this help message"
   echo
   echo -e "${C_BOLD}TIMER MANAGEMENT:${C_RESET}"
@@ -184,7 +186,7 @@ parse_time_input() {
   input="$1"
   if [ -z "$input" ]; then
     err "No time or seconds provided"
-    echo >&2
+    echo "Use one of the following formats:" >&2
     show_time_format >&2
     return 1
   fi
@@ -303,12 +305,12 @@ list_timers() {
   # [ "$for_fzf" == "false" ] && echo "─────────┼─────────────────┼────────────┼────────────────────"
   ALL_ACTIVE=true
 
-   while IFS= read -r line; do
-     IFS="$DELIMITER" read -r pid end_time name <<<"$line"
-     if [ -z "$name" ]; then
-       name="(no name)"
-     fi
-     current_time=$(date +%s)
+  while IFS= read -r line; do
+    IFS="$DELIMITER" read -r pid end_time name <<<"$line"
+    if [ -z "$name" ]; then
+      name="(no name)"
+    fi
+    current_time=$(date +%s)
 
     # --- PID Processing ---
     local pid_val="$pid"
@@ -456,7 +458,15 @@ parse_args() {
     -s | --stopwatch) STOPWATCH=1 ;;
     -f | --foreground) FOREGROUND=true ;;
     -n | --no-sound) NO_SOUND=true ;;
-    -t | --ntfy-topic)
+    -t | --timeout)
+      shift
+      TIMEOUT="$1"
+      if ! [[ "$TIMEOUT" =~ ^[0-9]+$ ]] || [ "$TIMEOUT" -lt 0 ]; then
+        echo "Timeout must be a non-negative integer in seconds"
+        exit 1
+      fi
+      ;;
+    -N | --ntfy-topic)
       shift
       NTFY_TOPIC="$1"
       if [ -z "$NTFY_TOPIC" ]; then
@@ -603,7 +613,7 @@ if [ "$NO_SOUND" = false ]; then
   fi
 fi
 
-notify-send -u critical -w "Time's Up!" "$TIMER_NAME" 2>/dev/null
+notify-send -u critical -w -t $TIMEOUT "Time's Up!" "$TIMER_NAME" 2>/dev/null
 
 if [ "$NO_SOUND" = false ] && [ -n "$SOUND_LOOP_PGID" ]; then
   kill -- -"$SOUND_LOOP_PGID" 2>/dev/null
