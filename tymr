@@ -106,7 +106,7 @@ show_help() {
   opt "-S, --sound-file PATH  " "Custom sound file to loop"
   opt "-v, --volume VOL       " "Set volume (1-100)"
   opt "-t, --timeout MILISEC  " "Set notification/sound timeout in milliseconds(0=infinite)"
-  opt "-N, --ntfy-topic TOPIC " "Send a fallback push via ntfy.sh/TOPIC"
+  opt "-N, --ntfy [TOPIC]     " "Send a fallback push via ntfy.sh/TOPIC"
   opt "-h, --help             " "Show this help message"
   echo
   echo -e "${C_BOLD}TIMER MANAGEMENT:${C_RESET}"
@@ -466,11 +466,12 @@ parse_args() {
         exit 1
       fi
       ;;
-    -N | --ntfy-topic)
+    -N | --ntfy)
       shift
-      NTFY_TOPIC="$1"
+      NTFY_FALLBACK=1
+      [ -n "$1" ] && NTFY_TOPIC="$1"
       if [ -z "$NTFY_TOPIC" ]; then
-        err "No topic provided for --ntfy-topic"
+        err "No topic provided for --ntfy nor found in config"
         exit 1
       fi
       ;;
@@ -578,7 +579,7 @@ if ! SECONDS=$(parse_time_input "$INPUT_TIME"); then
 fi
 
 target_epoch=$(($(date +%s) + SECONDS))
-[ -n "$NTFY_TOPIC" ] && push_ntfy "${TIMER_NAME:-"Timer finished"}" "$target_epoch"
+((NTFY_FALLBACK)) && [ -n "$NTFY_TOPIC" ] && push_ntfy "${TIMER_NAME:-"Timer finished"}" "$target_epoch"
 
 start_timer "$SECONDS"
 
