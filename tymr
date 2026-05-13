@@ -227,7 +227,7 @@ push_ntfy() {
   local tmp_file
   tmp_file=$(mktemp)
 
-  local curl_args=(-s -o "$tmp_file" -w "%{http_code}" -d "$message" "${NTFY_URL}/${NTFY_TOPIC}" -H "Title: tymr: Time's up!" -H "Priority: ${priority}")
+  local curl_args=(--connect-timeout 5 --max-time 10 -s -o "$tmp_file" -w "%{http_code}" -d "$message" "${NTFY_URL}/${NTFY_TOPIC}" -H "Title: tymr: Time's up!" -H "Priority: ${priority}")
   if [ -n "$delay" ]; then
     curl_args+=(-H "Delay: ${delay}")
   fi
@@ -503,7 +503,7 @@ parse_args() {
       ;;
     -N | --ntfy)
       shift
-      NTFY_FALLBACK=1
+      ENABLE_NTFY=1
       [ -n "$1" ] && NTFY_TOPIC="$1"
       if [ -z "$NTFY_TOPIC" ]; then
         err "No topic provided for --ntfy nor found in config"
@@ -512,17 +512,17 @@ parse_args() {
       ;;
     -P | --ntfy-priority)
       shift
-      NTFY_FALLBACK=1
+      ENABLE_NTFY=1
       [ -n "$1" ] && NTFY_PRIORITY="$1"
       ;;
     -U | --ntfy-url)
       shift
-      NTFY_FALLBACK=1
+      ENABLE_NTFY=1
       [ -n "$1" ] && NTFY_URL="$1"
       ;;
     -A | --ntfy-auth)
       shift
-      NTFY_FALLBACK=1
+      ENABLE_NTFY=1
       [ -n "$1" ] && NTFY_AUTH="$1"
       ;;
     -S | --sound-file)
@@ -629,7 +629,7 @@ if ! SECONDS=$(parse_time_input "$INPUT_TIME"); then
 fi
 
 target_epoch=$(($(date +%s) + SECONDS))
-if ((NTFY_FALLBACK)) && [ -n "$NTFY_TOPIC" ]; then
+if ((ENABLE_NTFY)) && [ -n "$NTFY_TOPIC" ]; then
   if [ "$SECONDS" -ge $NTFY_MINIMUM_DELAY ]; then
     push_ntfy "${TIMER_NAME:-"Timer finished"}" "$target_epoch" "$NTFY_PRIORITY"
   fi
@@ -638,6 +638,11 @@ fi
 start_timer "$SECONDS"
 
 set -m # enable job control. Needed for killing process groups(SOUND_LOOP_PGID)
+
+if ((ENABLE_NTFY)) && [ -n "$NTFY_TOPIC" ] && [ "$SECONDS" -lt $NTFY_MINIMUM_DELAY ]; then
+  push_ntfy "${TIMER_NAME:-"Timer finished"}" "" "$NTFY_PRIORITY" &
+fi
+
 if [ "$NO_SOUND" = false ]; then
   VOLUME_ARGS=""
   if [ -n "$VOLUME" ]; then
@@ -666,10 +671,6 @@ if [ "$NO_SOUND" = false ]; then
     done) &
     SOUND_LOOP_PGID=$!
   fi
-fi
-
-if ((NTFY_FALLBACK)) && [ -n "$NTFY_TOPIC" ] && [ "$SECONDS" -lt $NTFY_MINIMUM_DELAY ]; then
-  push_ntfy "${TIMER_NAME:-"Timer finished"}" "" "$NTFY_PRIORITY"
 fi
 
 notify-send -u critical -w -t $TIMEOUT "Time's Up!" "$TIMER_NAME" 2>/dev/null
