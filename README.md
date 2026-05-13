@@ -137,7 +137,9 @@ tymr -N my-phone-tymr-notif 10m "Meeting in 10 minutes"
 ```
 -  See [Usage](#usage) or `-h` for more ntfy options.  
 
-**Note:** `-N` is required to send ntfy notifications, even if you have a default topic set in the config file.
+> [!NOTE]
+> Even if you have a default topic set in the config file, `-N` (as the last argument) is required to send ntfy notifs.  
+> eg: `tymr 10m hi -N`
 
 > [!WARNING]
 > Once the timer is up, the ntfy push notification can't be dismissed, even if you delete the timer using `tymr -d`
