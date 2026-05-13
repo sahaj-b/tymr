@@ -14,3 +14,4 @@ PLAYER_VOL_FLAG=""      # Volume flag for the player command (eg, "--volume ")
 PLAYER_VOL_MULTIPLIER=1 # Multiplier for volume
 
 NTFY_TOPIC="" # Default notification topic for ntfy.sh
+NTFY_PRIORITY="3" # Default priority for ntfy.sh, see https://docs.ntfy.sh/publish/#message-priority
