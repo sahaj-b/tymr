@@ -654,11 +654,11 @@ if [ "$NO_SOUND" = false ]; then
   fi
 fi
 
-notify-send -u critical -w -t $TIMEOUT "Time's Up!" "$TIMER_NAME" 2>/dev/null
-
 if ((NTFY_FALLBACK)) && [ -n "$NTFY_TOPIC" ] && [ "$SECONDS" -lt $NTFY_MINIMUM_DELAY ]; then
   push_ntfy "${TIMER_NAME:-"Timer finished"}" "" "$NTFY_PRIORITY"
 fi
+
+notify-send -u critical -w -t $TIMEOUT "Time's Up!" "$TIMER_NAME" 2>/dev/null
 
 if [ "$NO_SOUND" = false ] && [ -n "$SOUND_LOOP_PGID" ]; then
   kill -- -"$SOUND_LOOP_PGID" 2>/dev/null
