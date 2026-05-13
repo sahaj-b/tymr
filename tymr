@@ -16,6 +16,8 @@ PLAYER_VOL_MULTIPLIER=1
 CONFIG_FILE="$HOME/.config/tymr/config"
 NTFY_TOPIC=""
 TIMEOUT=0
+NTFY_PRIORITY=3
+NTFY_URL="https://ntfy.sh"
 
 if [ -f "$CONFIG_FILE" ]; then
   # shellcheck source=/dev/null
@@ -106,14 +108,17 @@ show_help() {
   opt "-S, --sound-file PATH          " "Custom sound file to loop"
   opt "-v, --volume VOL               " "Set volume (1-100)"
   opt "-t, --timeout MILISEC          " "Set notification/sound timeout in milliseconds(0=infinite)"
-  opt "-N, --ntfy [TOPIC]             " "Send a fallback push via ntfy.sh/TOPIC"
-  opt "-P, --ntfy-priority [PRIORITY] " "Priority of the message (1=min, 2=low, 3=default, 4=high, 5=max)"
   opt "-h, --help                     " "Show this help message"
   echo
   echo -e "${C_BOLD}TIMER MANAGEMENT:${C_RESET}"
-  opt "-l, --list              " "List active timers"
-  opt "-d, --delete [PID/NAME] " "Delete timer. Runs in interactive mode(fzf) if no arg"
-  opt "-r, --revive            " "Revive killed timers' processes"
+  opt "-l, --list                     " "List active timers"
+  opt "-d, --delete [PID/NAME]        " "Delete timer. Runs in interactive mode(fzf) if no arg"
+  opt "-r, --revive                   " "Revive killed timers' processes"
+  echo
+  echo -e "${C_BOLD}NTFY OPTIONS:${C_RESET}"
+  opt "-N, --ntfy [TOPIC]             " "Send a fallback push via ntfy.sh/TOPIC"
+  opt "-P, --ntfy-priority PRIORITY   " "Priority of the message (1=min, 2=low, 3=default, 4=high, 5=max)"
+  opt "-U, --ntfy-url URL             " "Custom ntfy.sh URL (default: https://ntfy.sh)"
   echo
   echo -e "${C_BOLD}TIME/DURATION FORMATS:${C_RESET}"
   show_time_format
@@ -214,10 +219,9 @@ parse_time_input() {
 push_ntfy() {
   local message="$1"
   local delay="$2"
-  # default/normal priority is 3
-  local priority="${3:-3}"
+  local priority="$3"
   curl -d "$message" \
-    "https://ntfy.sh/${NTFY_TOPIC}" \
+    "${NTFY_URL}/${NTFY_TOPIC}" \
     -H "Title: tymr: Time's up!" \
     -H "Delay: ${delay}" \
     -H "Priority: ${priority}"
@@ -483,10 +487,11 @@ parse_args() {
       shift
       NTFY_FALLBACK=1
       [ -n "$1" ] && NTFY_PRIORITY="$1"
-      if [ -z "$NTFY_PRIORITY" ]; then
-        err "No priority provided for --ntfy-priority nor found in config"
-        exit 1
-      fi
+      ;;
+    -U | --ntfy-url)
+      shift
+      NTFY_FALLBACK=1
+      [ -n "$1" ] && NTFY_URL="$1"
       ;;
     -S | --sound-file)
       shift

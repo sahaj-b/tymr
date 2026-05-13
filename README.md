@@ -45,19 +45,23 @@ USAGE:
   timer [OPTIONS] TIME/DURATION [TIMER_NAME]
 
 OPTIONS:
-  -s, --stopwatch         Run as stopwatch (counts up)
-  -f, --foreground        Run timer in foreground
-  -n, --no-sound          Disable alarm sound
-  -S, --sound-file PATH   Custom sound file to loop
-  -v, --volume VOL        Set volume (1-100)
-  -N, --ntfy-topic TOPIC  Send a fallback push via ntfy.sh/TOPIC
-  -t, --timeout MILISEC   Set notification/sound timeout in miliseconds(0=infinite)
-  -h, --help              Show this help message
+  -s, --stopwatch                  Run as stopwatch (counts up)
+  -f, --foreground                 Run timer in foreground
+  -n, --no-sound                   Disable alarm sound
+  -S, --sound-file PATH            Custom sound file to loop
+  -v, --volume VOL                 Set volume (1-100)
+  -t, --timeout MILISEC            Set notification/sound timeout in milliseconds(0=infinite)
+  -h, --help                       Show this help message
 
 TIMER MANAGEMENT:
-   -l, --list               List active timers
-   -d, --delete [PID/NAME]  Delete timer. Runs in interactive mode(fzf) if no arg
-   -r, --revive             Revive killed timers' processes
+  -l, --list                       List active timers
+  -d, --delete [PID/NAME]          Delete timer. Runs in interactive mode(fzf) if no arg
+  -r, --revive                     Revive killed timers' processes
+
+NTFY OPTIONS:
+  -N, --ntfy [TOPIC]               Send a fallback push via ntfy.sh/TOPIC
+  -P, --ntfy-priority PRIORITY     Priority of the message (1=min, 2=low, 3=default, 4=high, 5=max)
+  -U, --ntfy-url URL               Custom ntfy.sh URL (default: https://ntfy.sh)
 
 TIME/DURATION FORMATS:
   Plain seconds:    300, 1500, etc.
@@ -126,10 +130,13 @@ tymr -d
 ### Fallback push notifications via ntfy.sh
 - [ntfy.sh](https://ntfy.sh) is a notification service that can send push notifications to your devices
 - Install the app on your phone(or other devices) and subscribe to a topic
-- Use `-N TOPIC`(or specify in config) to send a push notification to that topic when the timer is up
+- Use `-N TOPIC`(or specify in config) to send a push notification to that topic when the timer is up.
 ```bash
 tymr -N my-phone-tymr-notif 10m "Meeting in 10 minutes"
 ```
+-  See [Usage](#usage) or `-h` for more ntfy options.  
+
+**Note:** `-N` is required to send ntfy notifications, even if you have a default topic set in the config file.
 
 > [!WARNING]
 > Once the timer is up, the ntfy push notification can't be dismissed, even if you delete the timer using `tymr -d`
