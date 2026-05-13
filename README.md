@@ -62,6 +62,7 @@ NTFY OPTIONS:
   -N, --ntfy [TOPIC]               Send a fallback push via ntfy.sh/TOPIC
   -P, --ntfy-priority PRIORITY     Priority of the message (1=min, 2=low, 3=default, 4=high, 5=max)
   -U, --ntfy-url URL               Custom ntfy.sh URL (default: https://ntfy.sh)
+  -A, --ntfy-auth CREDENTIALS      Authentication for custom ntfy instance (user:pass or Bearer token)
 
 TIME/DURATION FORMATS:
   Plain seconds:    300, 1500, etc.

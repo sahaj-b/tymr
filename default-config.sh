@@ -16,3 +16,4 @@ PLAYER_VOL_MULTIPLIER=1 # Multiplier for volume
 NTFY_TOPIC=""              # Default notification topic for ntfy.sh
 NTFY_PRIORITY="3"          # Default priority for ntfy.sh message (1=min, 2=low, 3=default, 4=high, 5=max). See https://docs.ntfy.sh/publish/#message-priority
 NTFY_URL="https://ntfy.sh" # Custom ntfy.sh URL, eg: "https://your-ntfy-instance.com"
+NTFY_AUTH=""               # Authentication for custom ntfy.sh instance (user:pass or Bearer token)
