@@ -100,14 +100,15 @@ show_help() {
   echo -e "  timer ${C_DIM}[OPTIONS]${C_RESET} ${C_YELLOW}TIME/DURATION${C_RESET} ${C_DIM}[TIMER_NAME]${C_RESET}"
   echo
   echo -e "${C_BOLD}OPTIONS:${C_RESET}"
-  opt "-s, --stopwatch        " "Run as stopwatch (counts up)"
-  opt "-f, --foreground       " "Run timer in foreground"
-  opt "-n, --no-sound         " "Disable alarm sound"
-  opt "-S, --sound-file PATH  " "Custom sound file to loop"
-  opt "-v, --volume VOL       " "Set volume (1-100)"
-  opt "-t, --timeout MILISEC  " "Set notification/sound timeout in milliseconds(0=infinite)"
-  opt "-N, --ntfy [TOPIC]     " "Send a fallback push via ntfy.sh/TOPIC"
-  opt "-h, --help             " "Show this help message"
+  opt "-s, --stopwatch                " "Run as stopwatch (counts up)"
+  opt "-f, --foreground               " "Run timer in foreground"
+  opt "-n, --no-sound                 " "Disable alarm sound"
+  opt "-S, --sound-file PATH          " "Custom sound file to loop"
+  opt "-v, --volume VOL               " "Set volume (1-100)"
+  opt "-t, --timeout MILISEC          " "Set notification/sound timeout in milliseconds(0=infinite)"
+  opt "-N, --ntfy [TOPIC]             " "Send a fallback push via ntfy.sh/TOPIC"
+  opt "-P, --ntfy-priority [PRIORITY] " "Priority of the message (1=min, 2=low, 3=default, 4=high, 5=max)"
+  opt "-h, --help                     " "Show this help message"
   echo
   echo -e "${C_BOLD}TIMER MANAGEMENT:${C_RESET}"
   opt "-l, --list              " "List active timers"
@@ -213,10 +214,13 @@ parse_time_input() {
 push_ntfy() {
   local message="$1"
   local delay="$2"
+  # default/normal priority is 3
+  local priority="${3:-3}"
   curl -d "$message" \
     "https://ntfy.sh/${NTFY_TOPIC}" \
     -H "Title: tymr: Time's up!" \
-    -H "Delay: ${delay}"
+    -H "Delay: ${delay}" \
+    -H "Priority: ${priority}"
 }
 
 add_to_state() {
@@ -475,6 +479,15 @@ parse_args() {
         exit 1
       fi
       ;;
+    -P | --ntfy-priority)
+      shift
+      NTFY_FALLBACK=1
+      [ -n "$1" ] && NTFY_PRIORITY="$1"
+      if [ -z "$NTFY_PRIORITY" ]; then
+        err "No priority provided for --ntfy-priority nor found in config"
+        exit 1
+      fi
+      ;;
     -S | --sound-file)
       shift
       SOUND_FILE="$1"
@@ -579,7 +592,7 @@ if ! SECONDS=$(parse_time_input "$INPUT_TIME"); then
 fi
 
 target_epoch=$(($(date +%s) + SECONDS))
-((NTFY_FALLBACK)) && [ -n "$NTFY_TOPIC" ] && push_ntfy "${TIMER_NAME:-"Timer finished"}" "$target_epoch"
+((NTFY_FALLBACK)) && [ -n "$NTFY_TOPIC" ] && push_ntfy "${TIMER_NAME:-"Timer finished"}" "$target_epoch" "$NTFY_PRIORITY"
 
 start_timer "$SECONDS"
 
