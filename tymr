@@ -107,7 +107,7 @@ show_help() {
   opt "-v, --volume VOL               " "Set volume (1-100)"
   opt "-t, --timeout MILISEC          " "Set notification/sound timeout in milliseconds(0=infinite)"
   opt "-N, --ntfy [TOPIC]             " "Send a fallback push via ntfy.sh/TOPIC"
-  opt "-P, --ntfy-priority [PRIORITY] " "Set ntfy priority (1-5). See https://docs.ntfy.sh/publish/#message-priority"
+  opt "-P, --ntfy-priority [PRIORITY] " "Priority of the message (1=min, 2=low, 3=default, 4=high, 5=max)"
   opt "-h, --help                     " "Show this help message"
   echo
   echo -e "${C_BOLD}TIMER MANAGEMENT:${C_RESET}"
